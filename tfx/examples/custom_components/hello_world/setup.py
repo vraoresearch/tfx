@@ -1,4 +1,4 @@
-# Lint as: python2, python3
+# Lint as: python3
 # Copyright 2019 Google LLC. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,10 +14,21 @@
 # limitations under the License.
 """Package Setup script for HelloComponent."""
 
-from __future__ import print_function
+import os
 
 from setuptools import find_packages
 from setuptools import setup
+
+
+def select_constraint(default, git_master=None):
+  """Select dependency constraint based on TFX_DEPENDENCY_SELECTOR env var."""
+  selector = os.environ.get('TFX_DEPENDENCY_SELECTOR')
+  if selector == 'UNCONSTRAINED':
+    return ''
+  elif selector == 'GIT_MASTER' and git_master is not None:
+    return git_master
+  else:
+    return default
 
 
 # Get version from version module.
@@ -57,7 +68,11 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
     namespace_packages=[],
-    install_requires=['tfx>=0.23.0,<0.24.0.dev'],
+    install_requires=[
+        'tfx' + select_constraint(
+            default='>=0.23,<=0.24.0.dev',
+            git_master='@git+https://github.com/tensorflow/tfx@master'),
+    ],
     python_requires='>=3.5,<4',
     packages=find_packages(),
     include_package_data=True,
