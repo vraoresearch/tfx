@@ -1,0 +1,81 @@
+// Copyright 2020 Google LLC. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package tfx.orchestration;
+
+import "google/protobuf/descriptor.proto";
+
+// Placeholder is used in DSL IR executor specs to represent information that is
+// not available at pipeline authoring time. The placeholders will be rendered
+// at execution time to provided the needed information.
+message Placeholder {
+  oneof place_holder {
+    PrimitivePlaceholder primitive_placeholder = 1;
+    ExecPropertyPlaceholder exec_property_placeholder = 2;
+    ArtifactPlaceholder artifact_placeholder = 3;
+    ConcatPlaceholder concat_placeholder = 4;
+  }
+}
+
+// PrimitivePlaceholder is a special placeholder which value is fixed and
+// already provided at compilation time. The compiler may perfrom eager
+// evaluation to convert other placeholders known at compilation time to
+// primitive placeholders.
+message PrimitivePlaceholder {
+  string value = 1;
+}
+
+// ExecPropertyPlaceholder represents an execution property with the given key.
+// The value can be of proto type, in which case the proto descriptor is needed.
+message ExecPropertyPlaceholder {
+  // Required. Key to the execution property.
+  string key = 1;
+
+  // For proto-type execution property
+  proto2.FileDescriptorSet proto_descriptor = 2;
+  // Render a field inside the proto
+  string proto_field_path = 3;
+  // Render the whole serialized proto
+  bool encode_as_text_proto = 4;
+}
+
+// ArtifactPlaceholder represents an artifact with the given key.
+message ArtifactPlaceholder {
+  // Required Oneof.
+  bool input = 1;
+  bool output = 2;
+
+  // Required. Key to artifact.
+  string key = 3;
+
+  // Optional.
+  string split = 4;
+  string index = 5;
+
+  // Following fields controls how the ArtifactPlaceholder is rendered:
+  // Only render the artifact URI.
+  bool uri_only = 6;
+  // Render the whole artifact as a serialized proto.
+  bool whole_artifact = 7;
+}
+
+// ConcatPlaceholder helps placeholder rendering by concatnating other
+// placeholders.
+message ConcatPlaceholder {
+  // Expects a iterable value from ExecPropertyPlaceholder
+  repeated Placeholder place_holder = 1;
+  // Render as place_holder + separator + place_holder ...
+  string separator = 2;
+}

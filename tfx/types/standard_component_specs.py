@@ -356,22 +356,14 @@ class TransformSpec(ComponentSpec):
       'custom_config': ExecutionParameter(type=(str, Text), optional=True),
   }
   INPUTS = {
-      'examples':
-          ChannelParameter(type=standard_artifacts.Examples),
-      'schema':
-          ChannelParameter(type=standard_artifacts.Schema),
-      'analyzer_cache':
-          ChannelParameter(
-              type=standard_artifacts.TransformCache, optional=True),
+      'examples': ChannelParameter(type=standard_artifacts.Examples),
+      'schema': ChannelParameter(type=standard_artifacts.Schema),
   }
   OUTPUTS = {
       'transform_graph':
           ChannelParameter(type=standard_artifacts.TransformGraph),
       'transformed_examples':
           ChannelParameter(type=standard_artifacts.Examples, optional=True),
-      'updated_analyzer_cache':
-          ChannelParameter(
-              type=standard_artifacts.TransformCache, optional=True),
   }
   # TODO(b/139281215): these input / output names have recently been renamed.
   # These compatibility aliases are temporarily provided for backwards

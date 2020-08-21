@@ -20,8 +20,9 @@ from __future__ import print_function
 
 import os
 from typing import Any, Dict, List, Text
-
 from absl import logging
+
+from google.protobuf import json_format
 from tfx import types
 from tfx.components.base import base_driver
 from tfx.components.example_gen import utils
@@ -29,8 +30,6 @@ from tfx.orchestration import data_types
 from tfx.proto import example_gen_pb2
 from tfx.types import artifact_utils
 from tfx.types import channel_utils
-
-from google.protobuf import json_format
 
 
 class Driver(base_driver.BaseDriver):
