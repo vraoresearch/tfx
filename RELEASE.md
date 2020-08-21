@@ -4,6 +4,8 @@
 
 ## Bug fixes and other changes
 
+*   Depends on `absl-py>=0.9,<0.11`.
+
 ## Breaking changes
 
 ### For pipeline authors
