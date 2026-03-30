@@ -17,7 +17,26 @@ ARG BASE_IMAGE
 # Apache beam version to get Beam binaries.
 ARG BEAM_VERSION
 
-FROM ${BASE_IMAGE} as wheel-builder
+FROM ${BASE_IMAGE} AS base-with-gcc13
+RUN /opt/conda/bin/conda install -y --override-channels -c conda-forge \
+    gcc_linux-64=13 \
+    gxx_linux-64=13 \
+    binutils_linux-64=2.40 \
+    ld_impl_linux-64=2.40
+
+ENV CC=/opt/conda/bin/x86_64-conda-linux-gnu-gcc
+ENV CXX=/opt/conda/bin/x86_64-conda-linux-gnu-g++
+ENV LD=/opt/conda/bin/x86_64-conda-linux-gnu-ld
+ENV AR=/opt/conda/bin/x86_64-conda-linux-gnu-ar
+ENV NM=/opt/conda/bin/x86_64-conda-linux-gnu-nm
+ENV OBJCOPY=/opt/conda/bin/x86_64-conda-linux-gnu-objcopy
+ENV OBJDUMP=/opt/conda/bin/x86_64-conda-linux-gnu-objdump
+ENV RANLIB=/opt/conda/bin/x86_64-conda-linux-gnu-ranlib
+ENV STRIP=/opt/conda/bin/x86_64-conda-linux-gnu-strip
+
+ENV BAZEL_COMPILER=gcc
+
+FROM base-with-gcc13 AS wheel-builder
 ARG BASE_IMAGE
 ARG BEAM_VERSION
 # Whether to use C++ wheels (tfdv, tfx_bsl) from the host cache (/tmp/wheels).
@@ -84,10 +103,10 @@ RUN echo "Building TFX and SDK wheels from source..." && \
     fi
 
 # --- Stage 2: beam-worker ---
-FROM apache/beam_python3.10_sdk:${BEAM_VERSION} as beam-worker
+FROM apache/beam_python3.10_sdk:${BEAM_VERSION} AS beam-worker
 
 # --- Stage 3: install (Final) ---
-FROM ${BASE_IMAGE} as install
+FROM base-with-gcc13 AS install
 ARG BASE_IMAGE
 ARG ADDITIONAL_PACKAGES
 ARG TFX_DEPENDENCY_SELECTOR
