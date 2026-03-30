@@ -17,61 +17,82 @@ ARG BASE_IMAGE
 # Apache beam version to get Beam binaries.
 ARG BEAM_VERSION
 
-FROM gcr.io/tfx-oss-public/tfx_base:py310-20230921 as wheel-builder
-# docker build command should be run under root directory of github checkout.
-ENV TFX_DIR=/tfx
-ADD . ${TFX_DIR}/src
-WORKDIR ${TFX_DIR}
+FROM ${BASE_IMAGE} as wheel-builder
+ARG BASE_IMAGE
+ARG BEAM_VERSION
+# Whether to use C++ wheels (tfdv, tfx_bsl) from the host cache (/tmp/wheels).
+# If true, cached wheels are used if available (this saves time when debugging the docker build issues).
+# If false, wheels are built from source even if they exist in the cache.
+ARG USE_CPP_WHEELS_FROM_TEMP=false
 
 # Specify what version of dependent libraries will be used. See dependencies.py.
 ARG TFX_DEPENDENCY_SELECTOR
 ENV TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}
 ENV USE_BAZEL_VERSION=6.5.0
 
-RUN python -m pip install --upgrade pip wheel setuptools==70.0.0 tomli
+RUN apt-get update && apt-get install -y build-essential curl git python3-dev && \
+    (find /opt/conda/bin -name "python3-config" | head -n 1 | xargs -I {} ln -sf {} /usr/bin/python-config) && \
+    (find /opt/conda/bin -name "python3-config" | head -n 1 | xargs -I {} ln -sf {} /opt/conda/bin/python-config)
+RUN mkdir -p /usr/local/lib/bazel/bin && \
+    curl -fLO https://github.com/bazelbuild/bazel/releases/download/${USE_BAZEL_VERSION}/bazel-${USE_BAZEL_VERSION}-linux-x86_64 && \
+    mv bazel-${USE_BAZEL_VERSION}-linux-x86_64 /usr/local/lib/bazel/bin/bazel && \
+    chmod +x /usr/local/lib/bazel/bin/bazel && \
+    ln -sf /usr/local/lib/bazel/bin/bazel /usr/local/bin/bazel
+ENV PATH="/usr/local/lib/bazel/bin:${PATH}"
+
+COPY . /tfx/src/
+WORKDIR /tfx/src/
+
+# 1. C++ Wheels (tfdv, tfx_bsl) - Normal production build path
+RUN if [ "$USE_CPP_WHEELS_FROM_TEMP" = "false" ]; then \
+      echo "Rebuild of C++ wheels (tfdv, tfx_bsl)..." && \
+      cp tfx/tools/docker/build_tfdv_wheels.sh /tmp/ && \
+      cp tfx/tools/docker/build_tfx_bsl_wheels.sh /tmp/ && \
+      cp tfx/tools/docker/*.patch /tmp/ && \
+      mkdir -p /tfx/src/dist_wheels && \
+      bash /tmp/build_tfdv_wheels.sh /tfx/src/dist_wheels && \
+      bash /tmp/build_tfx_bsl_wheels.sh /tfx/src/dist_wheels ; \
+    fi
+
+# 2. C++ Wheels (tfdv, tfx_bsl) - Cached Path to avoid any CPP rebuilds
+RUN --mount=type=cache,target=/tmp/wheels --mount=type=cache,target=/root/.cache/bazel \
+    if [ "$USE_CPP_WHEELS_FROM_TEMP" = "true" ]; then \
+      echo "Re-use cached build of C++ wheels (tfdv, tfx_bsl)..." && \
+      cp tfx/tools/docker/build_tfdv_wheels.sh /tmp/ && \
+      cp tfx/tools/docker/build_tfx_bsl_wheels.sh /tmp/ && \
+      cp tfx/tools/docker/*.patch /tmp/ && \
+      if [ ! -f /tmp/wheels/tensorflow_data_validation-*.whl ]; then bash /tmp/build_tfdv_wheels.sh /tmp/wheels; fi && \
+      if [ ! -f /tmp/wheels/tfx_bsl-*.whl ]; then bash /tmp/build_tfx_bsl_wheels.sh /tmp/wheels; fi && \
+      mkdir -p /tfx/src/dist_wheels && \
+      cp /tmp/wheels/tensorflow_data_validation-*.whl /tfx/src/dist_wheels/ && \
+      cp /tmp/wheels/tfx_bsl-*.whl /tfx/src/dist_wheels/ ; \
+    fi
 
 # TODO(b/175089240): clean up conditional checks on whether ml-pipelines-sdk is
 # built after TFX versions <= 0.25 are no longer eligible for cherry-picks.
-RUN cd ${TFX_DIR}/src; \
+RUN echo "Building TFX and SDK wheels from source..." && \
+    mkdir -p /tfx/src/dist_wheels && \
     if [ -e "package_build" ]; then \
-      bash -x package_build/initialize.sh; \
-      cd package_build/ml-pipelines-sdk; \
-      CFLAGS=$(/usr/bin/python-config --cflags) \
-        python setup.py bdist_wheel; \
-      cd ../../package_build/tfx; \
-      CFLAGS=$(/usr/bin/python-config --cflags) \
-        python setup.py bdist_wheel; \
-      cd ../..; \
-      MLSDK_WHEEL=$(find dist -name "ml_pipelines_sdk-*.whl"); \
-      TFX_WHEEL=$(find dist -name "tfx-*.whl"); \
+      bash -x package_build/initialize.sh && \
+      CFLAGS=$(python-config --cflags) python package_build/ml-pipelines-sdk/setup.py bdist_wheel && \
+      CFLAGS=$(python-config --cflags) python package_build/tfx/setup.py bdist_wheel && \
+      cp package_build/ml-pipelines-sdk/dist/*.whl /tfx/src/dist_wheels/ && \
+      cp package_build/tfx/dist/*.whl /tfx/src/dist_wheels/ ; \
     else \
-      CFLAGS=$(/usr/bin/python-config --cflags) \
-        python setup.py bdist_wheel; \
-      MLSDK_WHEEL=; \
-      TFX_WHEEL=$(find dist -name "tfx-*.whl"); \
-    fi; \
-    if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
-      CFLAGS=$(/usr/bin/python-config --cflags) \
-        python -m pip install \
-          --extra-index-url https://pypi-nightly.tensorflow.org/simple \
-          ${MLSDK_WHEEL} ${TFX_WHEEL}[docker-image] -c tfx/tools/docker/requirements.txt -c tfx/tools/docker/build_constraints.txt; \
-    else \
-      CFLAGS=$(/usr/bin/python-config --cflags) \
-        python -m pip install ${MLSDK_WHEEL} ${TFX_WHEEL}[docker-image] -c tfx/tools/docker/requirements.txt -c tfx/tools/docker/build_constraints.txt; \
-    fi;
+      python setup.py bdist_wheel && \
+      cp dist/*.whl /tfx/src/dist_wheels/ ; \
+    fi
 
-# We need to name this step for the next COPY --from command.
+# --- Stage 2: beam-worker ---
 FROM apache/beam_python3.10_sdk:${BEAM_VERSION} as beam-worker
 
-# Build stage to extend DLVM image.
+# --- Stage 3: install (Final) ---
 FROM ${BASE_IMAGE} as install
-
-# Additional Python packages which will be installed.
+ARG BASE_IMAGE
 ARG ADDITIONAL_PACKAGES
-
-# Specify what version of dependent libraries will be used. See dependencies.py.
 ARG TFX_DEPENDENCY_SELECTOR
 ENV TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}
+ENV TF_USE_LEGACY_KERAS=1
 
 # Copy from image matching installed version of 'apache-beam'.
 COPY --from=beam-worker /opt/apache/beam /opt/apache/beam
@@ -84,60 +105,22 @@ ENTRYPOINT ["/opt/apache/beam/boot"]
 
 LABEL maintainer="tensorflow-extended-dev@googlegroups.com"
 
-RUN sed -i 's/python3/python/g' /usr/bin/pip
+COPY --from=wheel-builder /tfx/src /tfx/src
 
-RUN python -m pip install --upgrade pip setuptools==70.0.0 wheel
-
-RUN CURRENT_DIR="$(pwd)" && \
-  mkdir -p /usr/local/lib/bazel/bin && \
-  cd "/usr/local/lib/bazel/bin" && \
-  curl -fLO https://releases.bazel.build/6.5.0/release/bazel-6.5.0-linux-x86_64 && \
-  chmod +x bazel-6.5.0-linux-x86_64 && \
-  ln -sf /usr/local/lib/bazel/bin/bazel-6.5.0-linux-x86_64 /usr/local/bin/bazel && \
-  cd "$CURRENT_DIR"
-
-# Build tensorflow-data-validation wheels from source with patch
-RUN  /opt/conda/bin/conda install -y -c conda-forge \
-    gcc_linux-64=13 \
-    gxx_linux-64=13 \
-    binutils_linux-64=2.40 \
-    ld_impl_linux-64=2.40
-
- ENV CC=/opt/conda/bin/x86_64-conda-linux-gnu-gcc
-
- ENV CXX=/opt/conda/bin/x86_64-conda-linux-gnu-g++
-
- ENV LD=/opt/conda/bin/x86_64-conda-linux-gnu-ld
-
-COPY tfx/tools/docker/build_tfdv_wheels.sh /tmp/
-COPY tfx/tools/docker/tfdv.patch /tmp/
-RUN mkdir -p /tmp/wheels && \
-    bash /tmp/build_tfdv_wheels.sh /tmp/wheels
-
-# Build tfx-bsl wheels from source with patch
-COPY tfx/tools/docker/build_tfx_bsl_wheels.sh /tmp/
-COPY tfx/tools/docker/tfx_bsl.patch /tmp/
-RUN bash /tmp/build_tfx_bsl_wheels.sh /tmp/wheels
-
-# Copy constraint file and wheels
-COPY tfx/tools/docker/build_constraints.txt /tmp/
-COPY tfx/tools/docker/wheels/*.whl /tmp/wheels/
-
-# Install tensorflow-data-validation, tfx-bsl, tensorflow-model-analysis, tensorflow-transform, and tensorflow-cloud first
-RUN PIP_CONSTRAINT=/tmp/build_constraints.txt python -m pip install /tmp/wheels/tensorflow_data_validation-*.whl /tmp/wheels/tfx_bsl-*.whl /tmp/wheels/tensorflow_model_analysis-*.whl /tmp/wheels/tensorflow_transform-*.whl /tmp/wheels/tensorflow_cloud-*.whl
-
-COPY --from=wheel-builder /tfx/src/dist/*.whl /tfx/src/dist/
-WORKDIR /tfx/src
-
-RUN MLSDK_WHEEL=$(find dist -name "ml_pipelines_sdk-*.whl"); \
-    TFX_WHEEL=$(find dist -name "tfx-*.whl"); \
+RUN python -m pip install --no-cache-dir --no-deps /tfx/src/dist_wheels/*.whl && \
+    python -m pip install --no-cache-dir tf_keras && \
     if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
-      PIP_CONSTRAINT=/tmp/build_constraints.txt python -m pip install \
+      python -m pip install --no-cache-dir \
         --extra-index-url https://pypi-nightly.tensorflow.org/simple \
-        ${MLSDK_WHEEL} ${TFX_WHEEL}[docker-image] ${ADDITIONAL_PACKAGES} ; \
+        -c /tfx/src/tfx/tools/docker/requirements.txt \
+        -c /tfx/src/tfx/tools/docker/build_constraints.txt \
+        "tfx[docker-image]" ${ADDITIONAL_PACKAGES} ; \
     else \
-      PIP_CONSTRAINT=/tmp/build_constraints.txt python -m pip install ${MLSDK_WHEEL} ${TFX_WHEEL}[docker-image] \
-      ${ADDITIONAL_PACKAGES} ; \
-    fi && \
-    echo "Installed python packages:\n" && python -m pip list && \
+      python -m pip install --no-cache-dir \
+        -c /tfx/src/tfx/tools/docker/requirements.txt \
+        -c /tfx/src/tfx/tools/docker/build_constraints.txt \
+        "tfx[docker-image]" ${ADDITIONAL_PACKAGES} ; \
+    fi
+
+RUN echo "Installed python packages:\n" && python -m pip list && \
     echo "Setuptools version:" && python -c "import setuptools; print(setuptools.__version__)"

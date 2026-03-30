@@ -16,6 +16,21 @@
 # Convenience script to build TFX docker image.
 set -ex
 
+# Added by setup_kfp_e2e_tests_v2.sh
+_NEW_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --no-rebuild|--skip-rebuild) USE_CPP_WHEELS_FROM_TEMP=true; shift ;;
+    *) _NEW_ARGS+=("$1"); shift ;;
+  esac
+done
+set -- "${_NEW_ARGS[@]}"
+
+export USE_CPP_WHEELS_FROM_TEMP=${USE_CPP_WHEELS_FROM_TEMP:-false}
+export BEAM_VERSION=${BEAM_VERSION}
+export BASE_IMAGE=${BASE_IMAGE}
+
+
 DOCKER_IMAGE_REPO=${DOCKER_IMAGE_REPO:-"tensorflow/tfx"}
 DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-"latest"}
 DOCKER_FILE=${DOCKER_FILE:-"Dockerfile"}
@@ -58,6 +73,11 @@ function _get_tf_version_of_image() {
   docker run --rm --entrypoint=python ${img} -c 'import tensorflow as tf; print(tf.__version__)'
 }
 
+function _get_beam_version_of_image() {
+  local img="$1"
+  docker run --rm --entrypoint=python ${img} -c 'import apache_beam as beam; print(beam.version.__version__)'
+}
+
 # Base image to extend: This should be a deep learning image with a compatible
 # TensorFlow version. See
 # https://cloud.google.com/ai-platform/deep-learning-containers/docs/choosing-container
@@ -71,12 +91,17 @@ docker build --target wheel-builder\
   -t ${wheel_builder_tag} \
   -f tfx/tools/docker/${DOCKER_FILE} \
   --build-arg TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR} \
-  . "$@"
+  --build-arg USE_CPP_WHEELS_FROM_TEMP=${USE_CPP_WHEELS_FROM_TEMP} \
+  --build-arg BASE_IMAGE=${BASE_IMAGE} \
+  --build-arg BEAM_VERSION=${BEAM_VERSION} \
+  ${INLINE_CACHE_ARG} . "$@"
 
 # TensorFlow current TFX code depends on here and use that instead.
 if [[ -n "$BASE_IMAGE" ]]; then
   echo "Using override base image $BASE_IMAGE"
 else
+  BEAM_VERSION=$(_get_beam_version_of_image "${wheel_builder_tag}")
+  echo "Detected Beam version as ${BEAM_VERSION}"
   tf_version=$(_get_tf_version_of_image "${wheel_builder_tag}")
   arr_version=(${tf_version//./ })
   echo "Detected TensorFlow version as ${tf_version}"
@@ -108,15 +133,15 @@ else
   echo "Using compatible tf2-gpu image $BASE_IMAGE as base"
 fi
 
-beam_version=$(docker run --rm --entrypoint=python ${wheel_builder_tag} -c 'import apache_beam as beam; print(beam.version.__version__)')
 # Run docker build command.
 docker build -t ${DOCKER_IMAGE_REPO}:${DOCKER_IMAGE_TAG} \
   -f tfx/tools/docker/${DOCKER_FILE} \
   --build-arg "TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}" \
   --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
-  --build-arg "BEAM_VERSION=${beam_version}" \
+  --build-arg "BEAM_VERSION=${BEAM_VERSION}" \
   --build-arg "ADDITIONAL_PACKAGES=${ADDITIONAL_PACKAGES}" \
-  . "$@"
+  --build-arg USE_CPP_WHEELS_FROM_TEMP=${USE_CPP_WHEELS_FROM_TEMP} \
+  ${INLINE_CACHE_ARG} . "$@"
 
 if [[ -n "${installed_tf_version}" && ! "${installed_tf_version}" =~ rc ]]; then
   # Double-check whether TF is re-installed.
