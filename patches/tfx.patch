@@ -108,32 +108,3 @@ index 19489315a..05b464767 100644
      ]
 
 
-diff --git a/tfx/tools/docker/requirements.txt b/tfx/tools/docker/requirements.txt
-index d7b3e960e..7e7862afc 100644
---- a/tfx/tools/docker/requirements.txt
-+++ b/tfx/tools/docker/requirements.txt
-@@ -300,8 +300,6 @@ tenacity==9.0.0
- tensorboard==2.17.1
- tensorboard-data-server==0.7.2
- tensorflow==2.17.1
--tensorflow-cloud==0.1.16
--tensorflow-data-validation==1.17.0
- tensorflow-datasets==4.9.3
- tensorflow-decision-forests==1.10.1
- tensorflow-estimator==2.15.0
-@@ -312,7 +310,6 @@ tensorflow-metadata>=1.17.1
- # tensorflow-ranking==0.5.5
- tensorflow-serving-api==2.17.1
- tensorflow-text==2.17.0
--tensorflow-transform>=1.17.0
- tensorflow_model_analysis>=0.48.0
- tensorflowjs==4.17.0
- tensorstore==0.1.66
-@@ -320,7 +317,6 @@ termcolor==2.5.0
- terminado==0.18.1
- text-unidecode==1.3
- tflite-support==0.4.4
--tfx-bsl>=1.17.1
- threadpoolctl==3.5.0
- time-machine==2.16.0
- tinycss2==1.3.0
