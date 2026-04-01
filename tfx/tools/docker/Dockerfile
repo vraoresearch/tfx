@@ -121,7 +121,7 @@ ENV TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}
 ENV TF_USE_LEGACY_KERAS=1
 
 # 1. Apply OS security updates and install required system libraries
-RUN apt-get update && apt-get upgrade -y && \
+RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     libsnappy-dev \
@@ -171,7 +171,7 @@ RUN if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
 	    "$(find /tfx/src/dist_wheels/ \( -name 'tfx_dev-*.whl' -o -name 'tfx-*.whl' \) | head -n 1)[docker-image]" \
 	    tf_keras setuptools==78.1.1 ${ADDITIONAL_PACKAGES} ; \
     fi && \
-    python -m pip uninstall -y jupyter jupyter-server jupyterlab notebook nbconvert jaraco-context jaraco.context || true
+    (python -m pip uninstall -y jupyter jupyter-server jupyterlab notebook nbconvert jaraco-context jaraco.context || true)
 
 # 4. Final OS cleanup: remove Go toolchain and other unused tools to fix Go-related CVEs
 # Many High/Critical CVEs are in the Go stdlib/toolchain which we don't need at runtime.
