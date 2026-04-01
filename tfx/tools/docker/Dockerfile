@@ -43,13 +43,16 @@ ARG BEAM_VERSION
 # If true, cached wheels are used if available (this saves time when debugging the docker build issues).
 # If false, wheels are built from source even if they exist in the cache.
 ARG USE_CPP_WHEELS_FROM_TEMP=false
+# Whether to clear the persistent build caches (/tmp/wheels and bazel cache).
+ARG CLEAN_CPP_TEMP_CACHE=false
 
 # Specify what version of dependent libraries will be used. See dependencies.py.
 ARG TFX_DEPENDENCY_SELECTOR
 ENV TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}
+
 ENV USE_BAZEL_VERSION=6.5.0
 
-RUN apt-get update && apt-get install -y build-essential curl git python3-dev && \
+RUN apt-get update && apt-get install -y curl git && \
     (find /opt/conda/bin -name "python3-config" | head -n 1 | xargs -I {} ln -sf {} /usr/bin/python-config) && \
     (find /opt/conda/bin -name "python3-config" | head -n 1 | xargs -I {} ln -sf {} /opt/conda/bin/python-config)
 RUN mkdir -p /usr/local/lib/bazel/bin && \
@@ -58,6 +61,7 @@ RUN mkdir -p /usr/local/lib/bazel/bin && \
     chmod +x /usr/local/lib/bazel/bin/bazel && \
     ln -sf /usr/local/lib/bazel/bin/bazel /usr/local/bin/bazel
 ENV PATH="/usr/local/lib/bazel/bin:${PATH}"
+
 
 COPY . /tfx/src/
 WORKDIR /tfx/src/
@@ -98,7 +102,7 @@ RUN echo "Building TFX and SDK wheels from source..." && \
       cp package_build/ml-pipelines-sdk/dist/*.whl /tfx/src/dist_wheels/ && \
       cp package_build/tfx/dist/*.whl /tfx/src/dist_wheels/ ; \
     else \
-      python setup.py bdist_wheel && \
+      CFLAGS=$(python-config --cflags) python setup.py bdist_wheel && \
       cp dist/*.whl /tfx/src/dist_wheels/ ; \
     fi
 
@@ -109,9 +113,21 @@ FROM apache/beam_python3.10_sdk:${BEAM_VERSION} AS beam-worker
 FROM base-with-gcc13 AS install
 ARG BASE_IMAGE
 ARG ADDITIONAL_PACKAGES
+ENV TF_CPP_MIN_LOG_LEVEL=3
+# Disables Legacy "Virtual" Devices
+ENV TF_XLA_FLAGS="--tf_xla_enable_xla_devices=false"
 ARG TFX_DEPENDENCY_SELECTOR
 ENV TFX_DEPENDENCY_SELECTOR=${TFX_DEPENDENCY_SELECTOR}
 ENV TF_USE_LEGACY_KERAS=1
+
+# 1. Apply OS security updates and install required system libraries
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libsnappy-dev \
+    libcurl4-openssl-dev \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy from image matching installed version of 'apache-beam'.
 COPY --from=beam-worker /opt/apache/beam /opt/apache/beam
@@ -126,20 +142,42 @@ LABEL maintainer="tensorflow-extended-dev@googlegroups.com"
 
 COPY --from=wheel-builder /tfx/src /tfx/src
 
-RUN python -m pip install --no-cache-dir --no-deps /tfx/src/dist_wheels/*.whl && \
-    python -m pip install --no-cache-dir tf_keras && \
-    if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
-      python -m pip install --no-cache-dir \
-        --extra-index-url https://pypi-nightly.tensorflow.org/simple \
-        -c /tfx/src/tfx/tools/docker/requirements.txt \
-        -c /tfx/src/tfx/tools/docker/build_constraints.txt \
-        "tfx[docker-image]" ${ADDITIONAL_PACKAGES} ; \
+# 2. Upgrade core python build tools and remove unused vulnerable components
+# setuptools==78.1.1 is required for the pkg_resources shim (needed by apache-beam),
+# while providing the security fix for CVE-2025-47273.
+RUN python -m pip install --upgrade pip setuptools==78.1.1 wheel
+
+# 3. Main installation: consolidated to a single RUN for single-pass resolution.
+# We explicitly include setuptools==78.1.1 as a top-level requirement here
+# to ensure the resolver doesn't downgrade it or use a broken version
+# that lacks the pkg_resources shim (needed by apache-beam).
+RUN if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
+	  python -m pip install --no-cache-dir \
+            --extra-index-url https://pypi-nightly.tensorflow.org/simple \
+	    -c /tfx/src/tfx/tools/docker/requirements.txt \
+	    /tfx/src/dist_wheels/*.whl \
+	    /tfx/src/tfx/tools/docker/wheels/*.whl \
+	    "$(find /tfx/src/dist_wheels/ \( -name 'tfx_dev-*.whl' -o -name 'tfx-*.whl' \) | head -n 1)[docker-image]" \
+	    tf_keras setuptools==78.1.1 ${ADDITIONAL_PACKAGES} ; \
     else \
-      python -m pip install --no-cache-dir \
-        -c /tfx/src/tfx/tools/docker/requirements.txt \
-        -c /tfx/src/tfx/tools/docker/build_constraints.txt \
-        "tfx[docker-image]" ${ADDITIONAL_PACKAGES} ; \
-    fi
+	  python -m pip install --no-cache-dir \
+	    -c /tfx/src/tfx/tools/docker/requirements.txt \
+	    /tfx/src/dist_wheels/*.whl \
+	    /tfx/src/tfx/tools/docker/wheels/*.whl \
+	    "$(find /tfx/src/dist_wheels/ \( -name 'tfx_dev-*.whl' -o -name 'tfx-*.whl' \) | head -n 1)[docker-image]" \
+	    tf_keras setuptools==78.1.1 ${ADDITIONAL_PACKAGES} ; \
+    fi && \
+    python -m pip uninstall -y jupyter jupyter-server jupyterlab notebook nbconvert jaraco-context jaraco.context || true
+
+# 4. Final OS cleanup: remove Go toolchain and other unused tools to fix Go-related CVEs
+# Many High/Critical CVEs are in the Go stdlib/toolchain which we don't need at runtime.
+# We use a loop to avoid build failures if a package name is not found in the repo.
+RUN for pkg in golang-go golang git binutils wget policykit-1 packagekit gnupg2 gcc-12; do apt-get purge -y $pkg || echo "Package $pkg not found, skipping"; done && \
+    rm -rf /usr/local/go && \
+    rm -rf /opt/apache/beam && \
+    find /opt/conda/lib/python3.10/site-packages/apache_beam -type f -name "boot" -delete || true && \
+    apt-get autoremove -y && \
+    apt-get clean
 
 RUN echo "Installed python packages:\n" && python -m pip list && \
     echo "Setuptools version:" && python -c "import setuptools; print(setuptools.__version__)"

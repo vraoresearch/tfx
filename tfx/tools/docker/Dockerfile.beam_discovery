@@ -1,0 +1,15 @@
+FROM python:3.10-slim
+
+WORKDIR /src
+
+COPY tfx/dependencies.py .
+COPY tfx/tools/docker/discover_versions.py .
+COPY tfx/tools/docker/requirements.txt tfx/tools/docker/
+COPY tfx/tools/docker/build_constraints.txt tfx/tools/docker/
+
+RUN pip install --upgrade pip
+
+# Ensure dependencies.py can be imported
+ENV PYTHONPATH="/src"
+
+ENTRYPOINT ["python3", "discover_versions.py"]
