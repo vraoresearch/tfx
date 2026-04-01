@@ -145,7 +145,9 @@ COPY --from=wheel-builder /tfx/src /tfx/src
 # 2. Upgrade core python build tools and remove unused vulnerable components
 # setuptools==78.1.1 is required for the pkg_resources shim (needed by apache-beam),
 # while providing the security fix for CVE-2025-47273.
-RUN python -m pip install --upgrade pip setuptools==78.1.1 wheel
+RUN python -m pip install --upgrade pip setuptools==78.1.1 wheel \
+    -c /tfx/src/tfx/tools/docker/requirements.txt \
+    -c /tfx/src/tfx/tools/docker/build_constraints.txt
 
 # 3. Main installation: consolidated to a single RUN for single-pass resolution.
 # We explicitly include setuptools==78.1.1 as a top-level requirement here
@@ -155,6 +157,7 @@ RUN if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
 	  python -m pip install --no-cache-dir \
             --extra-index-url https://pypi-nightly.tensorflow.org/simple \
 	    -c /tfx/src/tfx/tools/docker/requirements.txt \
+	    -c /tfx/src/tfx/tools/docker/build_constraints.txt \
 	    /tfx/src/dist_wheels/*.whl \
 	    /tfx/src/tfx/tools/docker/wheels/*.whl \
 	    "$(find /tfx/src/dist_wheels/ \( -name 'tfx_dev-*.whl' -o -name 'tfx-*.whl' \) | head -n 1)[docker-image]" \
@@ -162,6 +165,7 @@ RUN if [ "${TFX_DEPENDENCY_SELECTOR}" = "NIGHTLY" ]; then \
     else \
 	  python -m pip install --no-cache-dir \
 	    -c /tfx/src/tfx/tools/docker/requirements.txt \
+	    -c /tfx/src/tfx/tools/docker/build_constraints.txt \
 	    /tfx/src/dist_wheels/*.whl \
 	    /tfx/src/tfx/tools/docker/wheels/*.whl \
 	    "$(find /tfx/src/dist_wheels/ \( -name 'tfx_dev-*.whl' -o -name 'tfx-*.whl' \) | head -n 1)[docker-image]" \

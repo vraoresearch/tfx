@@ -347,5 +347,3 @@ yarl==1.14.0
 zipp==3.20.2
 zstandard==0.23.0
 pip>=26.0.0
-setuptools==78.1.1
-wheel==0.45.1

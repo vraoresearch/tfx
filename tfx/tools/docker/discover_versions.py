@@ -30,7 +30,7 @@ def discover():
     beam_version = "unknown"
     try:
         # Use --report which returns JSON, much more reliable than parsing text
-        cmd = ["python3", "-m", "pip", "install", beam_req, "--dry-run", "--report", "-", "-c", "/src/tfx/tools/docker/requirements.txt"]
+        cmd = ["python3", "-m", "pip", "install", beam_req, "--dry-run", "--report", "-", "-c", "/src/tfx/tools/docker/requirements.txt", "-c", "/src/tfx/tools/docker/build_constraints.txt"]
         output = subprocess.check_output(cmd, stderr=subprocess.PIPE).decode()
         report = json.loads(output)
         for pkg in report.get("install", []):
@@ -40,7 +40,7 @@ def discover():
     except Exception:
         # Fallback to text parsing
         try:
-            cmd = ["python3", "-m", "pip", "install", beam_req, "--dry-run", "-c", "/src/tfx/tools/docker/requirements.txt"]
+            cmd = ["python3", "-m", "pip", "install", beam_req, "--dry-run", "-c", "/src/tfx/tools/docker/requirements.txt", "-c", "/src/tfx/tools/docker/build_constraints.txt"]
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode()
             match = re.search(r"apache-beam-([0-9]+\.[0-9]+\.[0-9]+)", output)
             if match:

@@ -7,7 +7,11 @@ COPY tfx/tools/docker/discover_versions.py .
 COPY tfx/tools/docker/requirements.txt tfx/tools/docker/
 COPY tfx/tools/docker/build_constraints.txt tfx/tools/docker/
 
-RUN pip install --upgrade pip
+ENV PIP_CONSTRAINT="/src/tfx/tools/docker/build_constraints.txt"
+
+RUN pip install --upgrade pip setuptools wheel tomli \
+    -c tfx/tools/docker/requirements.txt \
+    -c tfx/tools/docker/build_constraints.txt
 
 # Ensure dependencies.py can be imported
 ENV PYTHONPATH="/src"
