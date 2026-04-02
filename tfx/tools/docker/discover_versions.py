@@ -6,7 +6,7 @@ import sys
 def discover():
     # In the discovery container, we expect dependencies.py to be in /src
     sys.path.append('/src')
-    
+
     try:
         import dependencies
     except ImportError:
@@ -15,7 +15,7 @@ def discover():
         import dependencies
 
     packages = dependencies.make_required_install_packages()
-    
+
     # Find TensorFlow requirement
     tf_req = [p for p in packages if p.startswith("tensorflow") and not p.startswith("tensorflow-")][0]
     # Find Beam requirement
