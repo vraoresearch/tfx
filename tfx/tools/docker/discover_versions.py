@@ -2,7 +2,6 @@ import re
 import subprocess
 import json
 import sys
-import os
 
 def discover():
     # In the discovery container, we expect dependencies.py to be in /src
@@ -45,7 +44,7 @@ def discover():
             match = re.search(r"apache-beam-([0-9]+\.[0-9]+\.[0-9]+)", output)
             if match:
                 beam_version = match.group(1)
-        except:
+        except Exception:
             pass
 
     # Final fallback to regex on the requirement string itself if all else fails
